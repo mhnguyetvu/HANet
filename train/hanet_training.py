@@ -77,19 +77,19 @@ def augment_feature(rep, num_aug=5, sigma=0.1):
     return [rep + torch.randn_like(rep) * sigma for _ in range(num_aug)]
 
 # ======= Training / Evaluation =======
-def train_one_epoch(model, data, optimizer, loss_fn):
+def train_one_epoch(model, batch, optimizer, loss_fn):
     model.train()
-    for batch in data:
-        input_ids = batch["input_ids"].unsqueeze(0).to(DEVICE)
-        attention_mask = batch["attention_mask"].unsqueeze(0).to(DEVICE)
-        label = batch["label"].unsqueeze(0).to(DEVICE)
+    input_ids = batch["input_ids"].to(DEVICE)
+    attention_mask = batch["attention_mask"].to(DEVICE)
+    label = batch["label"].to(DEVICE)
 
-        logits, _ = model(input_ids, attention_mask)
-        loss = loss_fn(logits, label)
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    logits, _ = model(input_ids, attention_mask)
+    loss = loss_fn(logits, label)
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
 
 def evaluate(model, dataloader):
@@ -119,8 +119,10 @@ def run_training():
 
     print("\n🚀 Training Base Task...")
     for epoch in range(EPOCHS):
-        for batch in base_loader:
-            train_one_epoch(model, [batch], optimizer, loss_fn)
+        for i, batch in enumerate(base_loader):
+            train_one_epoch(model, batch, optimizer, loss_fn)
+            if i % 500 == 0:
+                print(f"  Step {i}/{len(base_loader)}...")
         acc = evaluate(model, base_loader)
         print(f"Epoch {epoch+1} - Base Task Accuracy: {acc:.4f}")
 
