@@ -1,0 +1,1 @@
+{"words": ["Maria", "drove", "from", "California", "to", "Nevada"], "gold_evt_links": [{"event_type": "Movement:Transport", "trigger": 1}]}

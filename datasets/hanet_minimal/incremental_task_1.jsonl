@@ -1,0 +1,2 @@
+{"words": ["An", "explosion", "occurred", "in", "Baghdad"], "gold_evt_links": [{"event_type": "Conflict:Attack", "trigger": 1}]}
+{"words": ["Several", "people", "were", "injured", "in", "the", "attack"], "gold_evt_links": [{"event_type": "Conflict:Attack", "trigger": 6}]}
