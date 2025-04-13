@@ -1,3 +1,0 @@
-Life:Marry
-Movement:Transport
-Conflict:Attack

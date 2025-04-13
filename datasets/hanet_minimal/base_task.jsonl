@@ -1,2 +1,0 @@
-{"words": ["Alice", "and", "Bob", "got", "married", "in", "Hawaii"], "gold_evt_links": [{"event_type": "Life:Marry", "trigger": 4}]}
-{"words": ["John", "traveled", "to", "Germany", "by", "plane"], "gold_evt_links": [{"event_type": "Movement:Transport", "trigger": 1}]}
