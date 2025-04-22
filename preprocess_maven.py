@@ -2,90 +2,70 @@ import json
 import os
 import random
 from collections import defaultdict
-
-# 🧷 Config
-INPUT_PATH = "/workspaces/HANet/data/base_task_random_1000.jsonl"
-OUTPUT_DIR = "/workspaces/HANet/data"
-NUM_BASE_CLASSES = 10
-NUM_INC_TASKS = 5
-
-random.seed(42)
+# === CONFIG ===
+INPUT_PATH = "/workspaces/HANet/data/train.jsonl"   # input gốc từ MAVEN
+OUTPUT_DIR = "/workspaces/HANet/data/small_split"  # nơi lưu output
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Step 1: Load all data
-print("📥 Loading data...")
+TOTAL_CLASSES = 10                # tổng số lớp muốn chọn
+BASE_CLASSES = 4                 # số lớp cho base task
+INC_TASKS = 2                    # số incremental tasks
+EX_BASE = 20                     # ví dụ/lớp cho base
+EX_INC = 5                       # ví dụ/lớp cho incremental
+
+# === STEP 1: Load data ===
 with open(INPUT_PATH, "r", encoding="utf-8") as f:
-    all_data = [json.loads(line) for line in f]
+    all_data = [json.loads(line.strip()) for line in f]
 
-# Step 2: Group by event_type
-event_types_set = set()
+# === STEP 2: Group documents by event type ===
 event2examples = defaultdict(list)
+for doc in all_data:
+    types = {ev["type"] for ev in doc.get("events", [])}
+    if types:
+        main_type = sorted(types)[0]  # dùng event type đầu tiên
+        event2examples[main_type].append(doc)
 
-for example in all_data:
-    added_types = set()
-    for evt in example.get("gold_evt_links", []):
-        event_type = evt["event_type"]
-        event_types_set.add(event_type)  # ✅ FIXED: Add to set for saving later
-        if event_type not in added_types:
-            event2examples[event_type].append(example)
-            added_types.add(event_type)
-# Sort for consistency
-event_types = sorted(event_types_set)
-random.shuffle(event_types)
+# === STEP 3: Chọn lớp đa dạng nhưng phổ biến nhất ===
+event_counts = {etype: len(exs) for etype, exs in event2examples.items()}
+sorted_event_types = sorted(event_counts.items(), key=lambda x: -x[1])
+selected_classes = [etype for etype, count in sorted_event_types if count >= EX_BASE][:TOTAL_CLASSES]
 
-# Step 3: Split classes
-base_classes = event_types[:NUM_BASE_CLASSES]
-inc_classes = event_types[NUM_BASE_CLASSES:]
-classes_per_task = len(inc_classes) // NUM_INC_TASKS
+print(f"🎯 Selected {len(selected_classes)} event types:", selected_classes)
 
-# Step 4: Create base task
-base_data = []
-for cls in base_classes:
-    base_data.extend(event2examples[cls])
+# === STEP 4: Chia thành các task ===
+base_classes = selected_classes[:BASE_CLASSES]
+inc_chunks = [
+    selected_classes[BASE_CLASSES + i*3 : BASE_CLASSES + (i+1)*3]
+    for i in range(INC_TASKS)
+]
 
-base_path = os.path.join(OUTPUT_DIR, "base_task.jsonl")
-with open(base_path, "w", encoding="utf-8") as f:
-    for item in base_data:
-        f.write(json.dumps(item, ensure_ascii=False) + "\n")
-print(f"✅ Base task saved: {base_path} ({len(base_data)} examples)")
+task_data = {"base": []}
+for i in range(INC_TASKS):
+    task_data[f"incr_{i+1}"] = []
 
-# Step 5: Create incremental tasks
-for i in range(NUM_INC_TASKS):
-    start = i * classes_per_task
-    end = (i + 1) * classes_per_task
-    inc_classes_i = inc_classes[start:end]
+# Helper để lấy mẫu theo lớp
+def sample_examples(classes, k):
+    examples = []
+    used_ids = set()
+    for cls in classes:
+        pool = [ex for ex in event2examples[cls] if ex["id"] not in used_ids]
+        sampled = random.sample(pool, min(len(pool), k))
+        examples.extend(sampled)
+        used_ids.update(ex["id"] for ex in sampled)
+    return examples
 
-    task_data = []
-    for cls in inc_classes_i:
-        task_data.extend(event2examples[cls])
+# Gán example vào từng task
+task_data["base"] = sample_examples(base_classes, EX_BASE)
+for i, cls in enumerate(inc_chunks):
+    task_data[f"incr_{i+1}"] = sample_examples(cls, EX_INC)
 
-    task_path = os.path.join(OUTPUT_DIR, f"incremental_task_{i+1}.jsonl")
-    with open(task_path, "w", encoding="utf-8") as f:
-        for item in task_data:
+# === STEP 5: Save .jsonl files ===
+def save_jsonl(data, path):
+    with open(path, "w", encoding="utf-8") as f:
+        for item in data:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
-    print(f"🧩 Incremental task {i+1} saved: {task_path} ({len(task_data)} examples)")
-# Step 6: Save all event types
-event_types_set = set()
 
-# Extract from all_data which you loaded earlier
-event2examples = defaultdict(list)
-
-for example in all_data:
-    added_types = set()
-    for evt in example.get("gold_evt_links", []):
-        event_type = evt["event_type"]
-        event_types_set.add(event_type)  # ✅ FIXED: Add to set for saving later
-        if event_type not in added_types:
-            event2examples[event_type].append(example)
-            added_types.add(event_type)
-
-# Sort for consistency
-event_types = sorted(event_types_set)
-
-# Save to file
-event_type_path = os.path.join(OUTPUT_DIR, "event_type.txt")
-with open(event_type_path, "w", encoding="utf-8") as f:
-    for evt in event_types:
-        f.write(evt + "\n")
-
-print(f"📄 Event types saved to: {event_type_path} ({len(event_types)} classes)")
+for task, examples in task_data.items():
+    path = os.path.join(OUTPUT_DIR, f"{task}_task.jsonl")
+    save_jsonl(examples, path)
+    print(f"✅ Saved {task} ({len(examples)} samples) to {path}")
