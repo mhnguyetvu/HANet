@@ -9,7 +9,7 @@ import psutil, os  # Để đo lượng RAM sử dụng
 import warnings
 warnings.filterwarnings('ignore')
 
-# Ép sử dụng GPU cụ thể (A100 gán vào cuda:0)
+# Sử dụng GPU cụ thể (A100 gán vào cuda:0)
 config.DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # Khởi tạo tokenizer BERT
@@ -22,7 +22,7 @@ model = HANetTriggerEncoder(config.BASE_MODEL, config.NUM_LABELS).to(config.DEVI
 optimizer = AdamW(model.parameters(), lr=config.LR)
 
 # Tải dữ liệu từ base task
-data = MAVENDataset("/data/AITeam/nguyetnvm/Hanet/data/small_split/base_task.jsonl", tokenizer)
+data = MAVENDataset("/data/AITeam/nguyetnvm/Hanet/data/hanet_benchmark/base_task.jsonl", tokenizer)
 
 # Tạo thư mục lưu checkpoint nếu chưa có
 os.makedirs("/data/AITeam/nguyetnvm/Hanet/checkpoints", exist_ok=True)
@@ -65,3 +65,6 @@ for epoch in range(config.MAX_EPOCHS):  # Lặp qua các epoch
         device_name = torch.cuda.get_device_name(torch.cuda.current_device())
         print(f"🔥 GPU memory: {gpu_mem:.2f} MB | 📟 GPU: {device_name}")
 
+print("Unique labels in batch:", labels.unique())
+print("NUM_LABELS:", config.NUM_LABELS)
+assert labels.min() >= 0 and labels.max() < config.NUM_LABELS, "Invalid label detected!"

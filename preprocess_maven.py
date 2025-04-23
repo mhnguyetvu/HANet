@@ -2,70 +2,81 @@ import json
 import os
 import random
 from collections import defaultdict
+
 # === CONFIG ===
-INPUT_PATH = "/workspaces/HANet/data/train.jsonl"   # input gốc từ MAVEN
-OUTPUT_DIR = "/workspaces/HANet/data/small_split"  # nơi lưu output
+INPUT_PATH = "/data/AITeam/nguyetnvm/Hanet/data/train.jsonl"
+OUTPUT_DIR = "/data/AITeam/nguyetnvm/Hanet/data/hanet_benchmark"
+TOTAL_CLASSES = 40        # tổng số class sử dụng
+BASE_CLASSES = 10         # số class trong base task
+INC_TASKS = 5             # số incremental tasks
+INC_CLASSES_PER_TASK = 6  # mỗi task incremental có m lớp
+BASE_SHOT = 100           # số ví dụ mỗi lớp trong base
+INC_SHOT = 5              # số ví dụ mỗi lớp trong incremental
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+random.seed(42)
 
-TOTAL_CLASSES = 10                # tổng số lớp muốn chọn
-BASE_CLASSES = 4                 # số lớp cho base task
-INC_TASKS = 2                    # số incremental tasks
-EX_BASE = 20                     # ví dụ/lớp cho base
-EX_INC = 5                       # ví dụ/lớp cho incremental
-
-# === STEP 1: Load data ===
+# === Load MAVEN data
 with open(INPUT_PATH, "r", encoding="utf-8") as f:
     all_data = [json.loads(line.strip()) for line in f]
 
-# === STEP 2: Group documents by event type ===
-event2examples = defaultdict(list)
+event2doc_ids = defaultdict(list)
+id2doc = {}
+
 for doc in all_data:
-    types = {ev["type"] for ev in doc.get("events", [])}
-    if types:
-        main_type = sorted(types)[0]  # dùng event type đầu tiên
-        event2examples[main_type].append(doc)
+    doc_id = doc["id"]
+    id2doc[doc_id] = doc
+    event_types = {ev["type"] for ev in doc.get("events", [])}
+    for et in event_types:
+        event2doc_ids[et].append(doc_id)
 
-# === STEP 3: Chọn lớp đa dạng nhưng phổ biến nhất ===
-event_counts = {etype: len(exs) for etype, exs in event2examples.items()}
+# === Chọn top-N phổ biến classes
+event_counts = {et: len(ids) for et, ids in event2doc_ids.items()}
 sorted_event_types = sorted(event_counts.items(), key=lambda x: -x[1])
-selected_classes = [etype for etype, count in sorted_event_types if count >= EX_BASE][:TOTAL_CLASSES]
+selected_classes = [et for et, count in sorted_event_types if count >= BASE_SHOT][:TOTAL_CLASSES]
 
-print(f"🎯 Selected {len(selected_classes)} event types:", selected_classes)
+assert len(selected_classes) >= BASE_CLASSES + INC_TASKS * INC_CLASSES_PER_TASK
 
-# === STEP 4: Chia thành các task ===
+# === Chia class theo task
 base_classes = selected_classes[:BASE_CLASSES]
-inc_chunks = [
-    selected_classes[BASE_CLASSES + i*3 : BASE_CLASSES + (i+1)*3]
-    for i in range(INC_TASKS)
-]
+incremental_classes = selected_classes[BASE_CLASSES:BASE_CLASSES + INC_TASKS * INC_CLASSES_PER_TASK]
+incr_class_chunks = [incremental_classes[i * INC_CLASSES_PER_TASK: (i + 1) * INC_CLASSES_PER_TASK] for i in range(INC_TASKS)]
 
-task_data = {"base": []}
-for i in range(INC_TASKS):
-    task_data[f"incr_{i+1}"] = []
+# === Gán document vào task, tránh trùng lặp
+used_doc_ids = set()
+task_to_doc_ids = {}
 
-# Helper để lấy mẫu theo lớp
-def sample_examples(classes, k):
-    examples = []
-    used_ids = set()
-    for cls in classes:
-        pool = [ex for ex in event2examples[cls] if ex["id"] not in used_ids]
-        sampled = random.sample(pool, min(len(pool), k))
-        examples.extend(sampled)
-        used_ids.update(ex["id"] for ex in sampled)
-    return examples
+def sample_docs(cls_list, k, used_set):
+    selected = set()
+    for cls in cls_list:
+        candidates = [doc_id for doc_id in event2doc_ids[cls] if doc_id not in used_set]
+        if len(candidates) < k:
+            print(f"⚠️ {cls} only has {len(candidates)} available docs.")
+        sampled = random.sample(candidates, min(k, len(candidates)))
+        selected.update(sampled)
+        used_set.update(sampled)
+    return selected
 
-# Gán example vào từng task
-task_data["base"] = sample_examples(base_classes, EX_BASE)
-for i, cls in enumerate(inc_chunks):
-    task_data[f"incr_{i+1}"] = sample_examples(cls, EX_INC)
+# Base task
+task_to_doc_ids["base"] = sample_docs(base_classes, BASE_SHOT, used_doc_ids)
 
-# === STEP 5: Save .jsonl files ===
-def save_jsonl(data, path):
+# Incremental tasks
+for i, class_chunk in enumerate(incr_class_chunks):
+    task_key = f"incr_{i+1}"
+    task_to_doc_ids[task_key] = sample_docs(class_chunk, INC_SHOT, used_doc_ids)
+
+# === Save tasks
+def save_jsonl(docs, path):
     with open(path, "w", encoding="utf-8") as f:
-        for item in data:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        for doc in docs:
+            f.write(json.dumps(doc, ensure_ascii=False) + "\n")
 
-for task, examples in task_data.items():
-    path = os.path.join(OUTPUT_DIR, f"{task}_task.jsonl")
-    save_jsonl(examples, path)
-    print(f"✅ Saved {task} ({len(examples)} samples) to {path}")
+for task, doc_ids in task_to_doc_ids.items():
+    docs = [id2doc[did] for did in doc_ids]
+    save_jsonl(docs, os.path.join(OUTPUT_DIR, f"{task}_task.jsonl"))
+    print(f"✅ Saved {task} with {len(docs)} documents")
+
+# === Save class info
+with open(os.path.join(OUTPUT_DIR, "event_type.txt"), "w", encoding="utf-8") as f:
+    for et in selected_classes:
+        f.write(et + "\n")

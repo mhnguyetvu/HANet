@@ -2,39 +2,66 @@
 import torch
 from transformers import BertTokenizer
 from models.hanet_model import HANetTriggerEncoder
+import json
+import os
+from tqdm import tqdm
 import config
-import json 
 
-# Load label_map
-with open("/data/AITeam/nguyetnvm/Hanet/checkpoints/label_map.json") as f:
+# === Load label map ===
+with open("/data/AITeam/nguyetnvm/Hanet/checkpoints/label_map.json", "r") as f:
     label_map = json.load(f)
-reverse_label_map = {v: k for k, v in label_map.items()}
+id2label = {v: k for k, v in label_map.items()}
 
-# Khởi tạo thiết bị và mô hình
-config.DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
-tokenizer = BertTokenizer.from_pretrained(config.BASE_MODEL)
-
-model = HANetTriggerEncoder(config.BASE_MODEL, config.NUM_LABELS).to(config.DEVICE)
-model.load_state_dict(torch.load("/data/AITeam/nguyetnvm/Hanet/checkpoints/hanet_incr_2_task.pt"))
+# === Load mô hình ===
+model = HANetTriggerEncoder(config.BASE_MODEL, num_labels=len(label_map)).to(config.DEVICE)
+model.load_state_dict(torch.load("/data/AITeam/nguyetnvm/Hanet/checkpoints/hanet_incr_3_task.pt"))
 model.eval()
 
-# ==== Ví dụ câu đầu vào ====
-text = "The rebels organized a large protest in the capital."
-trigger_offset = [2, 3]  # ví dụ từ 'organized'
+# === Load tokenizer ===
+tokenizer = BertTokenizer.from_pretrained(config.BASE_MODEL)
 
-# Tokenize
-inputs = tokenizer(text, truncation=True, padding="max_length", return_tensors="pt")
-input_ids = inputs["input_ids"].to(config.DEVICE)
-attention_mask = inputs["attention_mask"].to(config.DEVICE)
-trigger_pos = torch.tensor([trigger_offset]).to(config.DEVICE)
+# === Load dữ liệu valid
+input_path = "/data/AITeam/nguyetnvm/Hanet/data/valid.jsonl"
+output_path = "/data/AITeam/nguyetnvm/Hanet/predictions/predict_valid.jsonl"
+os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-# Dự đoán
-with torch.no_grad():
-    logits = model(input_ids, attention_mask, trigger_pos)
-    pred = torch.argmax(logits, dim=-1).item()
+results = []
 
-# Ánh xạ ngược label_map (bạn phải lưu label_map từ training nếu chưa có)
-reverse_label_map = {v: k for k, v in label_map.items()}
-event_type = reverse_label_map.get(pred, "UNKNOWN")
+with open(input_path, "r", encoding="utf-8") as f:
+    for line in tqdm(f, desc="🔍 Predicting"):
+        doc = json.loads(line.strip())
+        content = doc["content"]
 
-print(f"🔍 Trigger: '{text.split()[trigger_offset[0]]}' → Predicted event type: {event_type}")
+        for event in doc.get("events", []):
+            for mention in event["mention"]:
+                sent_id = mention["sent_id"]
+                offset = mention["offset"]
+                tokens = content[sent_id]["tokens"]
+
+                encoded = tokenizer(" ".join(tokens), return_tensors="pt", truncation=True, padding="max_length", max_length=512)
+                input_ids = encoded["input_ids"].to(config.DEVICE)
+                attention_mask = encoded["attention_mask"].to(config.DEVICE)
+                trigger_pos = torch.tensor([offset], device=config.DEVICE)
+
+                with torch.no_grad():
+                    logits = model(input_ids, attention_mask, trigger_pos)
+                    pred_id = logits.argmax(dim=-1).item()
+                    pred_label = id2label[pred_id]
+
+                results.append({
+                    "doc_id": doc["id"],
+                    "trigger_word": mention["trigger_word"],
+                    "pred_event_type": pred_label,
+                    "true_event_type": event["type"],
+                    "offset": offset,
+                    "sent_id": sent_id
+                })
+
+# === Lưu kết quả
+with open(output_path, "w", encoding="utf-8") as f:
+    for item in results:
+        f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+print(f"✅ Saved predictions to: {output_path}")
+
+
