@@ -1,130 +1,97 @@
-## DATASET
-https://drive.google.com/drive/folders/19Q0lqJE6A98OLnRqQVhbX3e6rG4BVGn8
+# HANet: Continual Few-Shot Event Detection
 
-📚 Reference
-HANet paper: Continual Few-shot Event Detection via Hierarchical Augmentation Networks (EMNLP 2022)
-
-MAVEN dataset: https://github.com/THU-KEG/MAVEN-dataset
-
-# 🧠 HANet Training Pipeline – Flow Explanation
-
-This training script implements a continual few-shot event detection model using **HANet-style training**, with memory replay and prototypical augmentation.
+This project implements **HANet** (Hierarchical Augmentation Network) for continual few-shot event detection using the MAVEN dataset.
 
 ---
 
-## 📦 1. Configuration
+## 📂 Folder Structure
 
+```
+Hanet/
+├── data/                    # MAVEN data and processed splits
+├── checkpoints/             # Saved model checkpoints and label map
+├── models/                  # HANet model definition
+├── utils/                   # Data loading utility
+├── preprocessing_maven.py  # Split MAVEN into base & incremental tasks
+├── config.py                # Training config
+├── train.py                 # Train on base task
+├── train_incremental.py     # Train on incremental tasks with memory replay
+└── predict.py               # Predict event type for new sentence
+```
+
+---
+
+## 🧪 1. Preprocess MAVEN
+
+Split `train.jsonl` into `base_task.jsonl`, `incr_1_task.jsonl`, `incr_2_task.jsonl`:
+
+```bash
+python preprocessing_maven.py
+```
+
+---
+
+## 🧠 2. Train base model
+
+```bash
+python train.py
+```
+
+- Trains on `base_task.jsonl`
+- Saves best checkpoint to `checkpoints/hanet_best_base.pt`
+
+---
+
+## 🔁 3. Continual training on incremental tasks
+
+```bash
+python train_incremental.py
+```
+
+- Trains sequentially on `incr_*.jsonl`
+- Uses memory replay (1 exemplar per class)
+- Saves checkpoints to `checkpoints/hanet_incr_X_task.pt`
+- Saves label map to `checkpoints/label_map.json`
+
+---
+
+## 🔍 4. Predict a new sentence
+
+```bash
+python predict.py
+```
+
+Example:
 ```python
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-BASE_MODEL = "bert-base-uncased"
-NUM_LABELS = 168
-BATCH_SIZE = 4
-LR = 2e-5
-MAX_EPOCHS = 5
+text = "The rebels organized a large protest in the capital."
+trigger_offset = [2, 3]  # token offset for 'organized'
+```
+Output:
+```
+🔍 Trigger: 'organized' → Predicted event type: Arranging
 ```
 
 ---
 
-## 🔤 2. Tokenizer and Label Mapping
+## ⚙️ Config (config.py)
 
-- Use `BertTokenizer` from Huggingface
-- Read `event_types.txt` and map event type → label index
-
----
-
-## 📚 3. Dataset Preparation
-
-Each line in the `.jsonl` file contains:
-- `"words"`: tokenized sentence
-- `"gold_evt_links"`: list of events in the sentence
-
-The custom `Dataset` returns:
-- `input_ids`, `attention_mask` (for BERT)
-- `label` (event type ID)
+| Parameter      | Description                        |
+|----------------|------------------------------------|
+| `BASE_MODEL`   | Pretrained BERT model              |
+| `NUM_LABELS`   | Max number of event types          |
+| `MAX_EPOCHS`   | Epochs per task                    |
+| `BATCH_SIZE`   | Training batch size                |
+| `DEVICE`       | CUDA or CPU                        |
 
 ---
 
-## 🧠 4. Model: BERT + Classifier
+## 📌 Notes
 
-```python
-BERT ➞ [CLS] vector ➞ Linear layer ➞ softmax
-```
-
-Also returns the `[CLS]` embedding for prototypical augmentation.
+- `label_map.json` is automatically generated at the end of incremental training.
+- Replay memory uses simple exemplar selection (e.g., longest trigger). Can be enhanced with embeddings or prototype matching.
 
 ---
 
-## 📂 5. Replay & Prototypical Augmentation
-
-- **Replay Memory**: stores representative samples from base classes
-- **Prototypical Augmentation**:
-  - Take the prototype embedding from few-shot sample
-  - Add Gaussian noise to simulate new instances
-  - Use synthetic embedding directly
-
----
-
-## 🏋️‍♂️ 6. Train Base Task
-
-- Load `base_task.jsonl`
-- Train normally on all base classes
-- Save 1 exemplar/class to memory
-
----
-
-## ➕ 7. Incremental Learning Loop
-
-For each `incremental_task_i.jsonl`:
-
-1. Extract embedding from few-shot examples
-2. Apply augmentation (5x per sample)
-3. Add replayed base exemplars
-4. Train on synthetic + real samples
-5. Evaluate on few-shot task
-
----
-
-## 🧹 8. Forward Override for Embedding-Only Samples
-
-To support synthetic inputs that contain no tokens:
-```python
-if input_ids.sum() == 0:
-    return classifier(embedding)
-```
-
----
-
-## ✅ 9. Evaluation
-
-Evaluate accuracy for:
-- Base task
-- Each incremental task
-
----
-
-## 📊 Flow Summary
-
-```text
-        base_task.jsonl               incremental_task_*.jsonl
-              │                               │
-              ▼                               ▼
-   ┌──────────────────────────┐            ┌─────────────────────────────────┐
-   │  Tokenize + Map  │            │ Few-shot + Augment + Replay │
-   └──────────────────────────┘            └─────────────────────────────────┘
-              │                               │
-              ▼                               ▼
-     Train base model                Fine-tune (new + memory)
-              │                               │
-              ▼                               ▼
-       Evaluate base                  Evaluate per-task
-```
-
----
-
-## 🔍 Optional Enhancements
-
-- [ ] Add `F1-score` computation
-- [ ] Log per-task results to file
-- [ ] Add contrastive loss (optional in HANet)
-- [ ] Save/load checkpoints
+**Author:** nguyetnvm  
+**Project Folder:** `/data/AITeam/nguyetnvm/Hanet/`M 
 
