@@ -16,12 +16,11 @@ This training script implements a continual few-shot event detection model using
 
 ```python
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MAX_LEN = 64
-BATCH_SIZE = 16
+BASE_MODEL = "bert-base-uncased"
+NUM_LABELS = 168
+BATCH_SIZE = 4
 LR = 2e-5
-EPOCHS = 3
-REPLAY_PER_CLASS = 1
-SIGMA = 0.1  # Gaussian noise for augmentation
+MAX_EPOCHS = 5
 ```
 
 ---
