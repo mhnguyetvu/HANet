@@ -93,5 +93,4 @@ Output:
 ---
 
 **Author:** nguyetnvm  
-**Project Folder:** `/data/AITeam/nguyetnvm/Hanet/`M 
 
