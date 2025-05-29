@@ -1,2 +1,19 @@
-transformers
-torch
+# Core deep learning
+torch==2.2.2
+torchaudio==2.2.2
+torchvision==0.17.2
+
+# PyTorch Lightning for training loop
+pytorch-lightning==2.2.1
+
+# HuggingFace ecosystem
+transformers==4.40.0
+tokenizers>=0.13.3
+
+# Utility tools
+scikit-learn
+tqdm
+numpy
+
+# Optional logging/monitoring
+tensorboard
