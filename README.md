@@ -1,96 +1,89 @@
-# HANet: Continual Few-Shot Event Detection
+# HANet: Hierarchical Augmentation for Continual Few-shot Event Detection
 
-This project implements **HANet** (Hierarchical Augmentation Network) for continual few-shot event detection using the MAVEN dataset.
-
----
-## DATASET
-https://drive.google.com/drive/folders/19Q0lqJE6A98OLnRqQVhbX3e6rG4BVGn8
-## 📂 Folder Structure
-
-```
-Hanet/
-├── data/                    # MAVEN data and processed splits
-├── checkpoints/             # Saved model checkpoints and label map
-├── models/                  # HANet model definition
-├── utils/                   # Data loading utility
-├── preprocessing_maven.py  # Split MAVEN into base & incremental tasks
-├── config.py                # Training config
-├── train.py                 # Train on base task
-├── train_incremental.py     # Train on incremental tasks with memory replay
-└── predict.py               # Predict event type for new sentence
-```
+This repository contains a PyTorch Lightning implementation of HANet, designed for Continual Few-shot Event Detection (CFED) tasks using the MAVEN dataset.
 
 ---
 
-## 🧪 1. Installation
+## 📁 Folder Structure
+```
+HANet/
+├── models/                  # HANet model implementation
+├── utils/                   # Data loader, losses, memory, and augment utils
+├── data/                    # Contains base_task.jsonl, incremental tasks, and label2id.json
+├── res/                     # Output predictions (e.g. results.jsonl for evaluation)
+├── train_base.py            # Train HANet on the base classes
+├── train_incremental.py     # Train HANet incrementally
+├── split_cf_ed_tasks.py     # Split MAVEN into base/incremental CFED tasks
+├── run_incremental_loop.py  # Loop through all incremental tasks sequentially
+├── predict.py               # Generate predictions for submission
+├── evaluate.py              # Evaluate using micro/macro F1 scores
+├── requirements.txt         # Python dependencies
+└── .gitignore               # Files to exclude from git
+```
 
+---
+
+## 🚀 Quickstart
+
+### 1. Create environment and install dependencies
 ```bash
-pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cu121
+conda create -n hanet python=3.10 -y
+conda activate hanet
+pip install torch==2.2.2 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
 ```
 
----
+### 2. Prepare MAVEN dataset
+Download:
+- `train.jsonl`, `valid.jsonl`, `test.jsonl` from [MAVEN-Dataset](https://github.com/THU-KEG/MAVEN-dataset)
 
-## 🧠 2. Train base model
-
+Then run:
 ```bash
-python train.py
+python split_cf_ed_tasks.py  # creates base_task.jsonl and incremental_task_*.jsonl
 ```
 
-- Trains on `base_task.jsonl`
-- Saves best checkpoint to `checkpoints/hanet_best_base.pt`
-
----
-
-## 🔁 3. Continual training on incremental tasks
-
+### 3. Train base model
 ```bash
-python train_incremental.py
+python train_base.py
 ```
 
-- Trains sequentially on `incr_*.jsonl`
-- Uses memory replay (1 exemplar per class)
-- Saves checkpoints to `checkpoints/hanet_incr_X_task.pt`
-- Saves label map to `checkpoints/label_map.json`
-
----
-
-## 🔍 4. Predict a new sentence
-
+### 4. Train incrementally (full sequence):
 ```bash
-python predict.py
+python run_incremental_loop.py
 ```
 
-Example:
-```python
-text = "The rebels organized a large protest in the capital."
-trigger_offset = [2, 3]  # token offset for 'organized'
+### 5. Predict on test set
+```bash
+python predict.py --model hanet_inc_final.ckpt --test data/test.jsonl --output res/results.jsonl
 ```
-Output:
+
+### 6. Evaluate
+```bash
+python evaluate.py --model hanet_inc_final.ckpt --test data/valid.jsonl
 ```
-🔍 Trigger: 'organized' → Predicted event type: Arranging
+Or use Codalab submission with zipped `res/results.jsonl`
+
+---
+
+## 📊 Evaluation
+- Metrics: Micro-F1 and Macro-F1
+- Submit predictions to [CodaLab leaderboard](https://codalab.lisn.upsaclay.fr/competitions/3480) for full evaluation
+
+---
+
+## 📌 Citation
+If you use this code, please cite the HANet paper:
+```
+@inproceedings{zhou2023hanet,
+  title={HANet: Hierarchical Augmentation for Continual Few-shot Event Detection},
+  author={Zhou, Wenhui and colleagues},
+  booktitle={Findings of ACL 2023},
+  year={2023}
+}
 ```
 
 ---
 
-## ⚙️ Config (config.py)
-
-| Parameter      | Description                        |
-|----------------|------------------------------------|
-| `BASE_MODEL`   | Pretrained BERT model              |
-| `NUM_LABELS`   | Max number of event types          |
-| `MAX_EPOCHS`   | Epochs per task                    |
-| `BATCH_SIZE`   | Training batch size                |
-| `DEVICE`       | CUDA or CPU                        |
-
----
-
-## 📌 Notes
-
-- `label_map.json` is automatically generated at the end of incremental training.
-- Replay memory uses simple exemplar selection (e.g., longest trigger). Can be enhanced with embeddings or prototype matching.
-
----
-
-**Author:** nguyetnvm  
-
+## 🙌 Acknowledgements
+- [MAVEN Dataset](https://github.com/THU-KEG/MAVEN-dataset)
+- Original HANet Paper: https://arxiv.org/abs/2305.13091
