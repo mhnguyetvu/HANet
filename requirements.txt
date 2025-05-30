@@ -13,7 +13,7 @@ tokenizers>=0.13.3
 # Utility tools
 scikit-learn
 tqdm
-numpy
+numpy < 2.0
 
 # Optional logging/monitoring
 tensorboard
