@@ -13,11 +13,7 @@ tokenizers>=0.13.3
 # Utility tools
 scikit-learn
 tqdm
-<<<<<<< HEAD
-numpy < 2.0
-=======
 numpy<2.0
->>>>>>> dd5cea8 (Modify Readme and requirements)
 
 # Optional logging/monitoring
 tensorboard
