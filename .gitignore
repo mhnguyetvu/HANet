@@ -1,3 +1,35 @@
-data/
+# Ignore Python cache
+__pycache__/
+*.py[cod]
+
+# Checkpoint folders (Jupyter, Lightning, etc.)
+.ipynb_checkpoints/
+lightning_logs*/
+*.ckpt
+*.log
+*.pt
+
+# Dataset artifacts
+res/
+*.jsonl
+*.zip
+
+# Environment
 .venv/
-checkpoints/
+venv/
+.env
+*.env
+
+# VSCode or PyCharm config
+.vscode/
+.idea/
+
+# Submission artifacts
+submission*.zip
+submission*/
+
+# Temp files
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db

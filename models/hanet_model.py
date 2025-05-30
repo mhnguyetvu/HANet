@@ -1,36 +1,71 @@
 import torch
 import torch.nn as nn
-from transformers import BertModel
+import pytorch_lightning as pl
+from transformers import AutoModel
+from typing import Any, Dict
+from utils.losses import info_nce_loss
 
-class HANetTriggerEncoder(nn.Module):
-    def __init__(self, model_name, num_labels):
+class HANetModel(pl.LightningModule):
+    def __init__(self, model_name: str, num_labels: int, lr: float = 2e-5, lambda_re=1.0, lambda_cls=1.0):
+        """
+        HANet with memory replay and contrastive augmentation support.
+
+        Args:
+            model_name (str): Name of the base BERT model.
+            num_labels (int): Number of event type classes.
+            lr (float): Learning rate.
+            lambda_re (float): Weight for replay loss.
+            lambda_cls (float): Weight for contrastive loss.
+        """
         super().__init__()
-        self.bert = BertModel.from_pretrained(model_name)
-        self.classifier = nn.Linear(self.bert.config.hidden_size * 2, num_labels)
+        self.save_hyperparameters()
 
-    def forward(self, input_ids, attention_mask, trigger_pos):
-        # BERT encoding
+        self.bert = AutoModel.from_pretrained(model_name)
+        self.classifier = nn.Linear(self.bert.config.hidden_size, num_labels)
+        self.loss_fn = nn.CrossEntropyLoss()
+
+    def forward(self, input_ids, attention_mask, trigger_mask, return_repr=False):
         outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
-        hidden_states = outputs.last_hidden_state  # [B, L, H]
+        sequence_output = outputs.last_hidden_state  # (B, T, H)
 
-        # === Extract trigger embeddings ===
-        batch_size = input_ids.size(0)
-        device = input_ids.device
+        # Get trigger token representation
+        masked_output = sequence_output * trigger_mask.unsqueeze(-1)
+        trigger_repr = masked_output.sum(1) / trigger_mask.sum(1, keepdim=True)
 
-        # Sanity check: trigger_pos.shape = [B, 2]
-        assert trigger_pos.size(1) == 2, "trigger_pos must have shape [B, 2]"
+        logits = self.classifier(trigger_repr)  # (B, C)
+        return (logits, trigger_repr) if return_repr else logits
 
-        # Clamp trigger indices to avoid out-of-bound
-        trigger_start = torch.clamp(trigger_pos[:, 0], 0, hidden_states.size(1) - 1)
-        trigger_end = torch.clamp(trigger_pos[:, 1] - 1, 0, hidden_states.size(1) - 1)
+    def training_step(self, batch: Dict[str, Any], batch_idx: int):
+        # Forward and primary loss
+        logits, trigger_repr = self(
+            input_ids=batch['input_ids'],
+            attention_mask=batch['attention_mask'],
+            trigger_mask=batch['trigger_mask'],
+            return_repr=True
+        )
+        loss = self.loss_fn(logits, batch['labels'])
+        self.log("train_ce_loss", loss)
 
-        # Get embeddings at trigger start & end
-        start_emb = hidden_states[torch.arange(batch_size, device=device), trigger_start]  # [B, H]
-        end_emb = hidden_states[torch.arange(batch_size, device=device), trigger_end]      # [B, H]
+        # Replay loss from augmented prototypes
+        if 'aug_repr' in batch:
+            loss_re = torch.mean((trigger_repr - batch['aug_repr'])**2)
+            loss += self.hparams.lambda_re * loss_re
+            self.log("loss_replay", loss_re)
 
-        # Concatenate trigger representation
-        trig_repr = torch.cat([start_emb, end_emb], dim=-1)  # [B, 2H]
+        # Contrastive loss using positive/negative trigger pairs
+        if 'pos_repr' in batch and 'neg_repr' in batch:
+            loss_cls = info_nce_loss(trigger_repr, batch['pos_repr'], batch['neg_repr'])
+            loss += self.hparams.lambda_cls * loss_cls
+            self.log("loss_contrastive", loss_cls)
 
-        # Classify
-        logits = self.classifier(trig_repr)  # [B, num_labels]
-        return logits
+        self.log("train_total_loss", loss)
+        return loss
+
+    def validation_step(self, batch: Dict[str, Any], batch_idx: int):
+        logits = self(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'], trigger_mask=batch['trigger_mask'])
+        preds = torch.argmax(logits, dim=-1)
+        acc = (preds == batch['labels']).float().mean()
+        self.log("val_acc", acc)
+
+    def configure_optimizers(self):
+        return torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)

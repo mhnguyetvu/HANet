@@ -1,45 +1,46 @@
 import json
-import torch
 from torch.utils.data import Dataset
+from transformers import AutoTokenizer
+import torch
 
 class MAVENDataset(Dataset):
-    def __init__(self, jsonl_path, tokenizer):
-        with open(jsonl_path, "r", encoding="utf-8") as f:
-            self.data = [json.loads(line.strip()) for line in f]
-
-        self.tokenizer = tokenizer
-
-        # Load 10 base classes
-        with open("/data/AITeam/nguyetnvm/Hanet/data/hanet_benchmark/event_type.txt", "r") as f:
-            all_classes = [line.strip() for line in f.readlines()]
-        self.base_classes = all_classes[:10]
-        self.label2id = {et: idx for idx, et in enumerate(self.base_classes)}
-
+    """
+    PyTorch Dataset for MAVEN-style event detection JSONL files.
+    Parses annotated events and generates input for training the HANet model.
+    """
+    def __init__(self, jsonl_path, tokenizer_name, label2id):
+        """
+        Args:
+            jsonl_path (str): Path to the JSONL file
+            tokenizer_name (str): HuggingFace tokenizer name (e.g., 'bert-base-uncased')
+            label2id (dict): Mapping from event type string to integer label
+        """
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        self.label2id = label2id
         self.samples = []
-        for doc in self.data:
-            content = doc["content"]  # list of sentences
-            for event in doc.get("events", []):
-                event_type = event["type"]
-                if event_type not in self.label2id:
-                    continue
-                label = self.label2id[event_type]
 
-                for mention in event["mention"]:
-                    sent_id = mention["sent_id"]
-                    offset = mention["offset"]
-                    tokens = content[sent_id]["tokens"]
+        with open(jsonl_path, 'r') as f:
+            for line in f:
+                doc = json.loads(line)
+                content = doc["content"]
 
-                    # Tokenize toàn bộ câu
-                    encoded = tokenizer(" ".join(tokens), return_tensors="pt", truncation=True, padding="max_length", max_length=512)
-                    input_ids = encoded["input_ids"].squeeze()
-                    attention_mask = encoded["attention_mask"].squeeze()
+                for event in doc.get("events", []):
+                    label = self.label2id[event["type"]]
+                    for m in event["mention"]:
+                        tokens = content[m["sent_id"]]["tokens"]
+                        offset = m["offset"]
+                        trigger_mask = [0] * len(tokens)
+                        for i in range(offset[0], offset[1]):
+                            trigger_mask[i] = 1
 
-                    self.samples.append({
-                        "input_ids": input_ids,
-                        "attention_mask": attention_mask,
-                        "trigger_pos": torch.tensor(offset),
-                        "label": torch.tensor(label)
-                    })
+                        encoding = self.tokenizer(tokens, is_split_into_words=True, return_tensors="pt", padding='max_length', truncation=True, max_length=128)
+
+                        self.samples.append({
+                            'input_ids': encoding['input_ids'].squeeze(),
+                            'attention_mask': encoding['attention_mask'].squeeze(),
+                            'trigger_mask': torch.tensor(trigger_mask + [0] * (128 - len(trigger_mask)))[:128],
+                            'labels': torch.tensor(label)
+                        })
 
     def __len__(self):
         return len(self.samples)

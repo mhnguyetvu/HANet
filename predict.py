@@ -1,67 +1,73 @@
-# === predict.py ===
-import torch
-from transformers import BertTokenizer
-from models.hanet_model import HANetTriggerEncoder
 import json
-import os
+import argparse
+import torch
+from models.hanet_model import HANetModel
+from transformers import AutoTokenizer
 from tqdm import tqdm
-import config
+import os
 
-# === Load label map ===
-with open("/data/AITeam/nguyetnvm/Hanet/checkpoints/label_map.json", "r") as f:
-    label_map = json.load(f)
-id2label = {v: k for k, v in label_map.items()}
+def load_test_candidates(path):
+    with open(path, 'r') as f:
+        return [json.loads(line) for line in f]
 
-# === Load mô hình ===
-model = HANetTriggerEncoder(config.BASE_MODEL, num_labels=len(label_map)).to(config.DEVICE)
-model.load_state_dict(torch.load("/data/AITeam/nguyetnvm/Hanet/checkpoints/hanet_incr_3_task.pt"))
-model.eval()
 
-# === Load tokenizer ===
-tokenizer = BertTokenizer.from_pretrained(config.BASE_MODEL)
+def predict(model, tokenizer, data, label2id, device):
+    id2label = {v: k for k, v in label2id.items()}
+    model.eval()
+    results = []
 
-# === Load dữ liệu valid
-input_path = "/data/AITeam/nguyetnvm/Hanet/data/valid.jsonl"
-output_path = "/data/AITeam/nguyetnvm/Hanet/predictions/predict_valid.jsonl"
-os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-results = []
-
-with open(input_path, "r", encoding="utf-8") as f:
-    for line in tqdm(f, desc="🔍 Predicting"):
-        doc = json.loads(line.strip())
+    for doc in tqdm(data):
         content = doc["content"]
+        candidates = doc["candidates"]
+        pred_list = []
 
-        for event in doc.get("events", []):
-            for mention in event["mention"]:
-                sent_id = mention["sent_id"]
-                offset = mention["offset"]
-                tokens = content[sent_id]["tokens"]
+        for mention in candidates:
+            sent = content[mention['sent_id']]
+            tokens = sent['tokens']
+            offset = mention['offset']
 
-                encoded = tokenizer(" ".join(tokens), return_tensors="pt", truncation=True, padding="max_length", max_length=512)
-                input_ids = encoded["input_ids"].to(config.DEVICE)
-                attention_mask = encoded["attention_mask"].to(config.DEVICE)
-                trigger_pos = torch.tensor([offset], device=config.DEVICE)
+            encoding = tokenizer(tokens, is_split_into_words=True, return_tensors="pt", padding='max_length', truncation=True, max_length=128)
+            trigger_mask = torch.zeros(128)
+            for i in range(offset[0], offset[1]):
+                if i < 128:
+                    trigger_mask[i] = 1
 
-                with torch.no_grad():
-                    logits = model(input_ids, attention_mask, trigger_pos)
-                    pred_id = logits.argmax(dim=-1).item()
-                    pred_label = id2label[pred_id]
+            with torch.no_grad():
+                logits = model(
+                    input_ids=encoding['input_ids'].to(device),
+                    attention_mask=encoding['attention_mask'].to(device),
+                    trigger_mask=trigger_mask.unsqueeze(0).to(device)
+                )
+                pred_label = torch.argmax(logits, dim=-1).item()
+                pred_list.append({"id": mention['id'], "type_id": pred_label})
 
-                results.append({
-                    "doc_id": doc["id"],
-                    "trigger_word": mention["trigger_word"],
-                    "pred_event_type": pred_label,
-                    "true_event_type": event["type"],
-                    "offset": offset,
-                    "sent_id": sent_id
-                })
+        results.append({"id": doc['id'], "predictions": pred_list})
 
-# === Lưu kết quả
-with open(output_path, "w", encoding="utf-8") as f:
-    for item in results:
-        f.write(json.dumps(item, ensure_ascii=False) + "\n")
-
-print(f"✅ Saved predictions to: {output_path}")
+    return results
 
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, required=True)
+    parser.add_argument("--label_map", type=str, default="data/label2id.json")
+    parser.add_argument("--test", type=str, required=True)
+    parser.add_argument("--output", type=str, default="res/results.jsonl")
+    args = parser.parse_args()
+
+    # Load label map
+    with open(args.label_map, 'r') as f:
+        label2id = json.load(f)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = HANetModel.load_from_checkpoint(args.model, model_name="bert-base-uncased", num_labels=len(label2id)).to(device)
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+    test_data = load_test_candidates(args.test)
+    preds = predict(model, tokenizer, test_data, label2id, device)
+
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    with open(args.output, "w") as f:
+        for item in preds:
+            f.write(json.dumps(item) + "\n")
+
+    print(f"✅ Saved predictions to {args.output}")
