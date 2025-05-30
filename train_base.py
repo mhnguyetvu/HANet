@@ -1,6 +1,6 @@
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
-from model.hanet_model import HANetModel
+from models.hanet_model import HANetModel
 from data_loader import MAVENDataset
 import os
 import json
