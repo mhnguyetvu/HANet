@@ -16,7 +16,6 @@ HANet/
 ├── split_cf_ed_tasks.py     # Split MAVEN into base/incremental CFED tasks
 ├── run_incremental_loop.py  # Loop through all incremental tasks sequentially
 ├── predict.py               # Generate predictions for submission
-├── evaluate.py              # Evaluate using micro/macro F1 scores
 ├── requirements.txt         # Python dependencies
 └── .gitignore               # Files to exclude from git
 ```
@@ -58,15 +57,10 @@ python predict.py --model hanet_inc_final.ckpt --test data/test.jsonl --output r
 ```
 
 ### 6. Evaluate
-```bash
-python evaluate.py --model hanet_inc_final.ckpt --test data/valid.jsonl
-```
-Or use Codalab submission with zipped `res/results.jsonl`
-
+Use Codalab submission with zipped `res/results.jsonl`
 ---
 
 ## 📊 Evaluation
-- Metrics: Micro-F1 and Macro-F1
 - Submit predictions to [CodaLab leaderboard](https://codalab.lisn.upsaclay.fr/competitions/3480) for full evaluation
 
 ---
